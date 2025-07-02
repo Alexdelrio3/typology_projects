@@ -1,0 +1,65 @@
+import asyncio
+import httpx
+import json
+import os
+from tqdm import tqdm
+
+API_KEY = "tu_api_key"
+API_URL = "https://api.deepseek.com/v1/chat/completions"
+MODELO = "deepseek-chat"
+CLASIFICADAS_PATH = "resultados/frases_clasificadas.json"
+CONTEXTO_PATH = "resultados/frases_contexto.json"
+
+async def requiere_contexto(frase: str, tipo: str) -> bool:
+    prompt = f"""
+Vas a recibir una frase breve que trata sobre {tipo} de participación (intensidad o diversidad).  
+Tu tarea es decidir si la frase contiene información suficiente para ser analizada directamente.
+
+- Si tiene suficiente información concreta, responde "false"
+- Si es ambigua o incompleta, responde "true"
+
+Frase:
+"{frase}"
+
+❗ Responde solo "true" o "false" (en minúsculas, entre comillas dobles).
+"""
+
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODELO,
+        "messages": [{"role": "system", "content": "Eres un analista experto en ciencia ciudadana."},
+                     {"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        "max_tokens": 5
+    }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(API_URL, headers=headers, json=payload)
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"].strip().lower()
+        return content == "true"
+
+async def evaluar_necesidad_de_contexto():
+    with open(CLASIFICADAS_PATH, "r", encoding="utf-8") as f:
+        documentos = json.load(f)
+
+    for doc in documentos:
+        nuevas = []
+        print(f"\n📄 Evaluando contexto en: {doc['archivo']}")
+        for entrada in tqdm(doc["frases_clasificadas"], desc="Evaluando"):
+            tipo = entrada["tipo"]
+            if tipo in ["intensidad", "diversidad"]:
+                necesita = await requiere_contexto(entrada["frase"], tipo)
+                entrada["requiere_contexto"] = necesita
+            else:
+                entrada["requiere_contexto"] = None  # no aplica
+            nuevas.append(entrada)
+        doc["frases_contextualizadas"] = nuevas
+        del doc["frases_clasificadas"]
+
+    with open(CONTEXTO_PATH, "w", encoding="utf-8") as f:
+        json.dump(documentos, f, indent=2, ensure_ascii=False)
+    print(f"\n✅ Análisis de contexto completado → {CONTEXTO_PATH}")
+
+if __name__ == "__main__":
+    asyncio.run(evaluar_necesidad_de_contexto())

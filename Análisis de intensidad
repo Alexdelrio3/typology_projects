@@ -1,9 +1,10 @@
 import asyncio
 import httpx
 import json
+import re
 from tqdm import tqdm
 
-API_KEY = "tu_api_key"
+API_KEY = "tu_api_key"  # <-- Sustituye con tu clave real
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 MODELO = "deepseek-chat"
 INPUT_PATH = "resultados/frases_contexto.json"
@@ -13,20 +14,45 @@ async def analizar_intensidad(frase: str):
     prompt = f"""
 Analiza la siguiente frase, identificando:
 
-1. La etapa del proceso científico a la que se refiere
+1. La etapa del proceso científico a la que se refiere, elije solo una:
+- "Definición del problema"
+- "Diseño metodológico"
+- "Recolección de datos"
+- "Análisis de datos"
+- "Interpretación de resultados"
+- "Toma de decisiones"
+- "Comunicación de resultados"
+
 2. El nivel de participación ciudadana, según esta clasificación:
 
-- Contributivo: la ciudadanía aporta datos sin decisión ni análisis
-- Colaborativo: la ciudadanía aporta datos y contribuye a decisiones o análisis básicos
-- Co-creativo: la ciudadanía co-diseña el proyecto con los científicos
-- Liderado por la ciudadanía: la ciudadanía inicia y lidera el proyecto
+- No hay participación 
+
+- Contributivo (Participación mínima): 
+    Ciudadanía: Recolecta datos, observa, aporta puntualmente.
+    Científico/a: Diseña y controla todo el análisis.
+    Ejemplo: “Los ciudadanos enviaban fotos mediante una app.”
+
+- Colaborativo (Participación consultiva):
+    Ciudadanía: Aporta datos y colabora en análisis básicos.
+    Científico/a: Supervisa con retroalimentación parcial.   
+    Ejemplo: “Los participantes ayudaron a ajustar el protocolo de muestreo.”
+
+- Co-creativo (Participación colaborativa):
+    Ciudadanía: Participa en el diseño, metodología, y análisis.
+    Científico/a: Actúa como socio y facilitador.
+    Ejemplo: “La comunidad definió las preguntas junto al equipo científico.”
+
+- Liderado por la ciudadanía (Participación plena):
+    Ciudadanía: Lidera el proyecto, toma decisiones, coordina.
+    Científico/a: Apoya como asesor técnico si es necesario.
+    Ejemplo: “El colectivo vecinal diseñó y gestionó el proyecto de monitoreo.”
 
 3. Asigna un score de 0 a 4:
-- 0 = sin participación
-- 1 = mínima (información unidireccional)
-- 2 = consultiva (retroalimentación considerada)
-- 3 = colaborativa (co-diseño parcial)
-- 4 = plena (control ciudadano)
+- 0 = No hay participación 
+- 1 = Contributivo
+- 2 = Colaborativo
+- 3 = Co-creativo
+- 4 = Liderado por la ciudadanía
 
 Frase:
 "{frase}"
@@ -40,13 +66,19 @@ Devuelve un JSON con esta estructura:
   "evidencia": "..."
 }}
 """
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
     payload = {
         "model": MODELO,
-        "messages": [{"role": "system", "content": "Eres un experto en participación ciudadana en ciencia."},
-                     {"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": "Eres un experto en participación ciudadana en ciencia."},
+            {"role": "user", "content": prompt}
+        ],
         "temperature": 0.1,
-        "max_tokens": 300
+        "max_tokens": 500
     }
 
     async with httpx.AsyncClient(timeout=90.0) as client:
@@ -57,7 +89,7 @@ Devuelve un JSON con esta estructura:
         if match:
             return json.loads(match.group())
         else:
-            return {"error": "Sin respuesta JSON válida"}
+            return {"error": "No se pudo extraer JSON de la respuesta"}
 
 async def ejecutar_analisis_intensidad():
     with open(INPUT_PATH, "r", encoding="utf-8") as f:
@@ -72,7 +104,6 @@ async def ejecutar_analisis_intensidad():
                     frase_data["resultado"] = resultado
                 except Exception as e:
                     frase_data["resultado"] = {"error": str(e)}
-        # no modificamos frases de tipo "diversidad"
 
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(documentos, f, indent=2, ensure_ascii=False)
@@ -81,3 +112,4 @@ async def ejecutar_analisis_intensidad():
 
 if __name__ == "__main__":
     asyncio.run(ejecutar_analisis_intensidad())
+

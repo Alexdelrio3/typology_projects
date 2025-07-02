@@ -1,0 +1,107 @@
+import asyncio
+import httpx
+import json
+import re
+from tqdm import tqdm
+
+API_KEY = "tu_api_key"  # <-- Sustituye con tu clave real
+API_URL = "https://api.deepseek.com/v1/chat/completions"
+MODELO = "deepseek-chat"
+INPUT_PATH = "resultados/analisis_intensidad.json"
+OUTPUT_PATH = "resultados/analisis_diversidad.json"
+
+async def analizar_diversidad(frase: str):
+    prompt = f"""
+Analiza la siguiente frase relacionada con diversidad de participación ciudadana:
+
+"{frase}"
+
+Evalúa si la frase contiene información sobre alguno de los siguientes tipos de diversidad:
+
+1. Diversidad cognitiva (saberes, conocimientos, marcos de pensamiento):
+   - Subcategorías: Conocimientos técnicos, Habilidades prácticas, Marcos conceptuales diversos, Enfoques interdisciplinarios
+
+2. Diversidad institucional (tipos de organizaciones implicadas):
+   - Subcategorías: Organizaciones formales, Iniciativas informales, Redes comunitarias, Estructuras híbridas
+
+3. Diversidad social (culturas, redes, trayectorias vitales):
+   - Subcategorías: Diversidad cultural, Diferentes orígenes sociales, Redes diversas, Experiencias de vida variadas
+
+4. Diversidad geográfica (territorios involucrados):
+   - Subcategorías: Urbano, Rural, Indígena, Costero, Montañoso, Transfronterizo
+
+Para cada dimensión donde haya información explícita o implícita:
+
+- Indica las subcategorías identificadas (mínimo 1)
+- Calcula el índice de Shannon usando esta fórmula:  
+  H = - Σ (p_i * ln(p_i)),  
+  donde p_i es la proporción de menciones por subcategoría  
+- Si solo hay 1 subcategoría → H = 0  
+- Si todas están presentes de forma equilibrada → H ≈ ln(n)
+
+Devuelve exclusivamente un objeto JSON como este:
+
+{{
+  "dimensiones": {{
+    "Cognitiva": {{
+      "subcategorias_detectadas": ["Conocimientos técnicos", "Habilidades prácticas"],
+      "shannon": 0.69,
+      "evidencia": "Se mencionan diferentes tipos de saberes técnicos y habilidades prácticas."
+    }},
+    "Social": {{
+      "subcategorias_detectadas": ["Diversidad cultural"],
+      "shannon": 0.0,
+      "evidencia": "Participaron ciudadanos de múltiples orígenes culturales."
+    }}
+  }}
+}}
+
+Si no se detecta diversidad en alguna dimensión, no incluyas esa dimensión en el resultado.
+"""
+
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": MODELO,
+        "messages": [
+            {"role": "system", "content": "Eres un experto en análisis de diversidad en ciencia ciudadana."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 700
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(API_URL, headers=headers, json=payload)
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        else:
+            return {"error": "No se pudo extraer JSON de la respuesta"}
+
+async def ejecutar_analisis_diversidad():
+    with open(INPUT_PATH, "r", encoding="utf-8") as f:
+        documentos = json.load(f)
+
+    for doc in documentos:
+        print(f"\n📄 Analizando DIVERSIDAD en: {doc['archivo']}")
+        for frase_data in tqdm(doc["frases_contextualizadas"], desc="Diversidad"):
+            if frase_data["tipo"] == "diversidad" and frase_data["requiere_contexto"] is False:
+                try:
+                    resultado = await analizar_diversidad(frase_data["frase"])
+                    frase_data["resultado"] = resultado
+                except Exception as e:
+                    frase_data["resultado"] = {"error": str(e)}
+
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(documentos, f, indent=2, ensure_ascii=False)
+
+    print(f"\n✅ Análisis de diversidad completado → {OUTPUT_PATH}")
+
+if __name__ == "__main__":
+    asyncio.run(ejecutar_analisis_diversidad())

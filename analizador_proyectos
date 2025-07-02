@@ -1,55 +1,110 @@
 import os
 import re
 import json
-import fitz  # PyMuPDF
+import pdfplumber  # <-- CAMBIO: Usamos pdfplumber en lugar de fitz (PyMuPDF)
+import nltk      # <-- NUEVO: Añadimos la biblioteca de Procesamiento de Lenguaje Natural
 from datetime import datetime
 from uuid import uuid4
 
-# ------------------ CONFIGURACIÓN ------------------
+# ------------------ CONFIGURACIÓN INICIAL ------------------
 PDF_FOLDER = "pdfs"  # Carpeta donde están los PDF
 RESULT_FOLDER = "resultados"
 os.makedirs(RESULT_FOLDER, exist_ok=True)
 
-def limpiar_texto(texto: str) -> str:
+# Descargar el modelo 'punkt' de NLTK para separar frases de forma inteligente.
+# Solo se descarga una vez si no está presente.
+try:
+    nltk.data.find('tokenizers/punkt')
+except nltk.downloader.DownloadError:
+    print("INFO: Descargando el modelo 'punkt' de NLTK para análisis de frases...")
+    nltk.download('punkt')
+    print("INFO: Descarga completada.")
+
+# ------------------ FUNCIONES MEJORADAS ------------------
+
+def limpiar_frase(texto: str) -> str:
+    """Limpia una única frase eliminando saltos de línea y espacios extra."""
     texto = texto.replace("\n", " ").replace("\t", " ")
     texto = re.sub(r"\s+", " ", texto).strip()
     return texto
 
-def extraer_frases_unicas(texto: str):
-    frases = re.split(r'(?<=[.!?]) +', texto)
-    frases_limpias = list(set(frase.strip() for frase in frases if len(frase.strip()) > 20))
-    return frases_limpias
-
-def extraer_texto_pdf(pdf_path: str) -> str:
+def extraer_texto_pdf_con_plumber(pdf_path: str) -> str:
+    """
+    NUEVA FUNCIÓN DE EXTRACCIÓN:
+    Usa pdfplumber para extraer texto de un PDF, respetando tablas y columnas.
+    """
+    texto_completo = ""
     try:
-        doc = fitz.open(pdf_path)
-        texto = " ".join([page.get_text() for page in doc])
-        return limpiar_texto(texto)
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                # .extract_text() de pdfplumber es excelente para mantener el orden de lectura
+                texto_pagina = page.extract_text(x_tolerance=2, layout=True)
+                if texto_pagina:
+                    texto_completo += texto_pagina + "\n"
+        return texto_completo
     except Exception as e:
-        print(f"❌ Error procesando {pdf_path}: {e}")
+        print(f"❌ Error procesando {pdf_path} con pdfplumber: {e}")
         return ""
 
-def procesar_todos_los_pdfs():
-    resultados = []
-    for archivo in os.listdir(PDF_FOLDER):
-        if archivo.endswith(".pdf"):
-            ruta = os.path.join(PDF_FOLDER, archivo)
-            texto = extraer_texto_pdf(ruta)
-            frases = extraer_frases_unicas(texto)
-            resultados.append({
-                "archivo": archivo,
-                "id": str(uuid4()),
-                "procesado_en": datetime.now().isoformat(),
-                "num_frases": len(frases),
-                "frases": frases
-            })
-            print(f"✅ {archivo} → {len(frases)} frases únicas")
+def extraer_frases_unicas_con_nltk(texto: str):
+    """
+    NUEVA FUNCIÓN DE SEPARACIÓN DE FRASES:
+    Usa NLTK para una separación de frases más precisa y luego limpia y filtra.
+    """
+    # NLTK es más inteligente que un simple split, entiende abreviaturas como "Mr." o "e.g."
+    # Usamos 'english' porque el documento de ejemplo está en inglés. Cambiar si es necesario.
+    frases = nltk.sent_tokenize(texto, language='english')
+    
+    # Aplicamos la limpieza a cada frase y nos quedamos con las únicas y de longitud adecuada
+    frases_limpias = set()
+    for frase in frases:
+        frase_limpia = limpiar_frase(frase)
+        if len(frase_limpia) > 20: # Mantenemos tu filtro de más de 20 caracteres
+            frases_limpias.add(frase_limpia)
+            
+    return list(frases_limpias)
 
-    salida = os.path.join(RESULT_FOLDER, "frases_extraidas.json")
+def procesar_todos_los_pdfs():
+    """
+    FUNCIÓN PRINCIPAL (MODIFICADA LIGERAMENTE):
+    Usa las nuevas funciones de extracción y separación.
+    """
+    resultados = []
+    lista_pdfs = [f for f in os.listdir(PDF_FOLDER) if f.lower().endswith(".pdf")]
+    
+    if not lista_pdfs:
+        print(f"AVISO: No se encontraron archivos PDF en la carpeta '{PDF_FOLDER}'.")
+        return
+        
+    print(f"Encontrados {len(lista_pdfs)} PDF(s). Iniciando procesamiento...")
+    
+    for archivo in lista_pdfs:
+        ruta = os.path.join(PDF_FOLDER, archivo)
+        
+        # 1. Extraer texto con el método mejorado de pdfplumber
+        texto = extraer_texto_pdf_con_plumber(ruta)
+        
+        if not texto:
+            print(f"⚠️  No se pudo extraer texto de {archivo}.")
+            continue
+            
+        # 2. Separar en frases con el método mejorado de NLTK
+        frases = extraer_frases_unicas_con_nltk(texto)
+        
+        resultados.append({
+            "archivo": archivo,
+            "id": str(uuid4()),
+            "procesado_en": datetime.now().isoformat(),
+            "num_frases": len(frases),
+            "frases": frases
+        })
+        print(f"✅ {archivo} → {len(frases)} frases únicas extraídas.")
+
+    salida = os.path.join(RESULT_FOLDER, "frases_extraidas_mejorado.json")
     with open(salida, "w", encoding="utf-8") as f:
         json.dump(resultados, f, indent=2, ensure_ascii=False)
-    print(f"\n📄 Frases guardadas en: {salida}")
+    print(f"\n📄 ¡Proceso completado! Frases guardadas en: {salida}")
 
-# Ejecutar
+# ------------------ EJECUCIÓN ------------------
 if __name__ == "__main__":
     procesar_todos_los_pdfs()

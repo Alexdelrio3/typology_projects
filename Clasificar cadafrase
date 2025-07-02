@@ -4,7 +4,7 @@ import json
 import os
 from tqdm import tqdm
 
-API_KEY = "sk-4fea9774d1ec403ebfbb020843c83d0f"  # <--- Sustituye por tu clave real
+API_KEY = "  # <--- Sustituye por tu clave real
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 MODELO = "deepseek-chat"
 FRASIS_PATH = "resultados/frases_extraidas.json"

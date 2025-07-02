@@ -1,0 +1,83 @@
+import asyncio
+import httpx
+import json
+from tqdm import tqdm
+
+API_KEY = "tu_api_key"
+API_URL = "https://api.deepseek.com/v1/chat/completions"
+MODELO = "deepseek-chat"
+INPUT_PATH = "resultados/frases_contexto.json"
+OUTPUT_PATH = "resultados/analisis_intensidad.json"
+
+async def analizar_intensidad(frase: str):
+    prompt = f"""
+Analiza la siguiente frase, identificando:
+
+1. La etapa del proceso científico a la que se refiere
+2. El nivel de participación ciudadana, según esta clasificación:
+
+- Contributivo: la ciudadanía aporta datos sin decisión ni análisis
+- Colaborativo: la ciudadanía aporta datos y contribuye a decisiones o análisis básicos
+- Co-creativo: la ciudadanía co-diseña el proyecto con los científicos
+- Liderado por la ciudadanía: la ciudadanía inicia y lidera el proyecto
+
+3. Asigna un score de 0 a 4:
+- 0 = sin participación
+- 1 = mínima (información unidireccional)
+- 2 = consultiva (retroalimentación considerada)
+- 3 = colaborativa (co-diseño parcial)
+- 4 = plena (control ciudadano)
+
+Frase:
+"{frase}"
+
+Devuelve un JSON con esta estructura:
+
+{{
+  "etapa": "...",
+  "nivel": "...",
+  "score": 0,
+  "evidencia": "..."
+}}
+"""
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODELO,
+        "messages": [{"role": "system", "content": "Eres un experto en participación ciudadana en ciencia."},
+                     {"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": 300
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(API_URL, headers=headers, json=payload)
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        else:
+            return {"error": "Sin respuesta JSON válida"}
+
+async def ejecutar_analisis_intensidad():
+    with open(INPUT_PATH, "r", encoding="utf-8") as f:
+        documentos = json.load(f)
+
+    for doc in documentos:
+        print(f"\n📄 Analizando INTENSIDAD en: {doc['archivo']}")
+        for frase_data in tqdm(doc["frases_contextualizadas"], desc="Intensidad"):
+            if frase_data["tipo"] == "intensidad" and frase_data["requiere_contexto"] is False:
+                try:
+                    resultado = await analizar_intensidad(frase_data["frase"])
+                    frase_data["resultado"] = resultado
+                except Exception as e:
+                    frase_data["resultado"] = {"error": str(e)}
+        # no modificamos frases de tipo "diversidad"
+
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(documentos, f, indent=2, ensure_ascii=False)
+
+    print(f"\n✅ Análisis de intensidad completado → {OUTPUT_PATH}")
+
+if __name__ == "__main__":
+    asyncio.run(ejecutar_analisis_intensidad())

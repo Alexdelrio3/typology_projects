@@ -1,0 +1,55 @@
+import os
+import re
+import json
+import fitz  # PyMuPDF
+from datetime import datetime
+from uuid import uuid4
+
+# ------------------ CONFIGURACIÓN ------------------
+PDF_FOLDER = "pdfs"  # Carpeta donde están los PDF
+RESULT_FOLDER = "resultados"
+os.makedirs(RESULT_FOLDER, exist_ok=True)
+
+def limpiar_texto(texto: str) -> str:
+    texto = texto.replace("\n", " ").replace("\t", " ")
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return texto
+
+def extraer_frases_unicas(texto: str):
+    frases = re.split(r'(?<=[.!?]) +', texto)
+    frases_limpias = list(set(frase.strip() for frase in frases if len(frase.strip()) > 20))
+    return frases_limpias
+
+def extraer_texto_pdf(pdf_path: str) -> str:
+    try:
+        doc = fitz.open(pdf_path)
+        texto = " ".join([page.get_text() for page in doc])
+        return limpiar_texto(texto)
+    except Exception as e:
+        print(f"❌ Error procesando {pdf_path}: {e}")
+        return ""
+
+def procesar_todos_los_pdfs():
+    resultados = []
+    for archivo in os.listdir(PDF_FOLDER):
+        if archivo.endswith(".pdf"):
+            ruta = os.path.join(PDF_FOLDER, archivo)
+            texto = extraer_texto_pdf(ruta)
+            frases = extraer_frases_unicas(texto)
+            resultados.append({
+                "archivo": archivo,
+                "id": str(uuid4()),
+                "procesado_en": datetime.now().isoformat(),
+                "num_frases": len(frases),
+                "frases": frases
+            })
+            print(f"✅ {archivo} → {len(frases)} frases únicas")
+
+    salida = os.path.join(RESULT_FOLDER, "frases_extraidas.json")
+    with open(salida, "w", encoding="utf-8") as f:
+        json.dump(resultados, f, indent=2, ensure_ascii=False)
+    print(f"\n📄 Frases guardadas en: {salida}")
+
+# Ejecutar
+if __name__ == "__main__":
+    procesar_todos_los_pdfs()
